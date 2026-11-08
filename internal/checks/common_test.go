@@ -6,6 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/twallac10/platform-promoter/internal/config"
@@ -71,6 +72,16 @@ func TestHelmTests(t *testing.T) {
 	expect(t, HelmTests{}.Run(ctx, newEnv(t, app, ociAndHR(testDigest, testDigest, "True", "", true, ok), nil)), gate.Pass)
 	bad := map[string]any{"t1": map[string]any{"phase": "Failed"}}
 	expect(t, HelmTests{}.Run(ctx, newEnv(t, app, ociAndHR(testDigest, testDigest, "True", "", true, bad), nil)), gate.Fail)
+
+	// Tests enabled, chart has none: Flux reports TestSuccess=True with no hooks.
+	objs := ociAndHR(testDigest, testDigest, "True", "", true, nil)
+	hr := objs[1].(*unstructured.Unstructured)
+	conds, _, _ := unstructured.NestedSlice(hr.Object, "status", "conditions")
+	conds = append(conds, map[string]any{"type": "TestSuccess", "status": "True", "message": "no test hooks"})
+	unstructured.SetNestedSlice(hr.Object, conds, "status", "conditions")
+	expect(t, HelmTests{}.Run(ctx, newEnv(t, app, objs, nil)), gate.Skip)
+	// Tests enabled, not run yet: wait.
+	expect(t, HelmTests{}.Run(ctx, newEnv(t, app, ociAndHR(testDigest, testDigest, "True", "", true, nil), nil)), gate.Pending)
 }
 
 func pod(name, image string) *corev1.Pod {

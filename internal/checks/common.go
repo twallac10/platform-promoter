@@ -222,10 +222,17 @@ func (HelmTests) Run(ctx context.Context, env *gate.Env) gate.Result {
 	}
 	hooks, _ := latest["testHooks"].(map[string]any)
 	if len(hooks) == 0 {
-		if st, _, _, _ := cluster.Condition(hr, "TestSuccess"); st == "" {
+		// No hooks recorded: either Flux hasn't run tests for this release yet
+		// (no TestSuccess condition) or it ran them and the chart has none
+		// (TestSuccess=True, "no test hooks").
+		switch st, _, msg, _ := cluster.Condition(hr, "TestSuccess"); st {
+		case "True":
 			return skip("chart has no tests")
+		case "False":
+			return fail("helm test failed: "+msg, "", q)
+		default:
+			return pending("tests not run yet", q)
 		}
-		return pending("tests not recorded yet", q)
 	}
 	var failed, running []string
 	for n, h := range hooks {

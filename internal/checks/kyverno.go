@@ -28,16 +28,16 @@ func init() {
 
 // GVRs used by the Kyverno check sets.
 var (
-	kyvernoVPolGVR     = schema.GroupVersionResource{Group: "policies.kyverno.io", Version: "v1", Resource: "validatingpolicies"}
-	kyvernoCPolGVR     = schema.GroupVersionResource{Group: "kyverno.io", Version: "v1", Resource: "clusterpolicies"}
-	kyvernoReportGVR   = schema.GroupVersionResource{Group: "wgpolicyk8s.io", Version: "v1alpha2", Resource: "policyreports"}
-	kyvernoVWCGVR      = schema.GroupVersionResource{Group: "admissionregistration.k8s.io", Version: "v1", Resource: "validatingwebhookconfigurations"}
-	kyvernoMWCGVR      = schema.GroupVersionResource{Group: "admissionregistration.k8s.io", Version: "v1", Resource: "mutatingwebhookconfigurations"}
-	kyvernoPodGVR      = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
-	kyvernoCanaryNS    = "canary"
+	kyvernoVPolGVR   = schema.GroupVersionResource{Group: "policies.kyverno.io", Version: "v1", Resource: "validatingpolicies"}
+	kyvernoCPolGVR   = schema.GroupVersionResource{Group: "kyverno.io", Version: "v1", Resource: "clusterpolicies"}
+	kyvernoReportGVR = schema.GroupVersionResource{Group: "wgpolicyk8s.io", Version: "v1alpha2", Resource: "policyreports"}
+	kyvernoVWCGVR    = schema.GroupVersionResource{Group: "admissionregistration.k8s.io", Version: "v1", Resource: "validatingwebhookconfigurations"}
+	kyvernoMWCGVR    = schema.GroupVersionResource{Group: "admissionregistration.k8s.io", Version: "v1", Resource: "mutatingwebhookconfigurations"}
+	kyvernoPodGVR    = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	kyvernoCanaryNS  = "canary"
 	// Dry-run pods go to the promoter's own namespace: it exists wherever a
 	// gate runs, unlike the canary, which is installed after every app.
-	kyvernoDryRunNS = "promoter"
+	kyvernoDryRunNS    = "promoter"
 	kyvernoPrivPolicy  = "disallow-privileged-containers"
 	kyvernoBaselineKey = "kyverno.canary_policy_failures"
 )

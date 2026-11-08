@@ -25,7 +25,7 @@ type files struct{ head, main map[string][]byte }
 
 func (f files) Head(p string) ([]byte, bool, error) { b, ok := f.head[p]; return b, ok, nil }
 func (f files) Main(p string) ([]byte, bool, error) { b, ok := f.main[p]; return b, ok, nil }
-func (f files) MainCommit(string) (string, error)    { return "c0ffee1", nil }
+func (f files) MainCommit(string) (string, error)   { return "c0ffee1", nil }
 
 type deps map[string]*ledger.Deployment // env/cluster
 
