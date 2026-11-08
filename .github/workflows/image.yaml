@@ -1,0 +1,41 @@
+# Builds and pushes ghcr.io/<owner>/platform-promoter:<tag> on v* tags.
+# One-time manual step: make the package public (GitHub has no API for it),
+# so the tier clusters can pull it without an imagePullSecret.
+name: image
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/platform-promoter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Vet and test
+        run: go vet ./... && go test ./...
+      - name: Build
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then TAG="$(cat VERSION)"; fi
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+          docker build -t "${IMAGE}:${TAG}" .
+      - name: Push
+        run: |
+          docker login ghcr.io -u ${{ github.actor }} --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
+          docker push "${IMAGE}:${TAG}"
+          DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:${TAG}")"
+          {
+            echo "### Pushed image"
+            echo
+            echo '```'
+            echo "${DIGEST}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

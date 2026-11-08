@@ -1,0 +1,117 @@
+# Reusable promotion guardrails, called by every app repo's promotion.yaml on
+# every PR to main. Branch protection requires one check: `promotion / promotion-gate`.
+#
+#   guardrails      verify-pr: diff rules, copy-of-source, source tier's recorded
+#                   evidence for the same digest, OCI-only sources; secret scan
+#   approval        only for promotions: runs in the target tier's environment, so
+#                   tiers with required reviewers pause here until approved
+#   promotion-gate  the required check. Always runs and fails closed: a skipped
+#                   job counts as passing for branch protection, so this job, not
+#                   `needs`, decides.
+#
+# Callers pin this file by tag (…/guardrails.yaml@v0.1.0); `promoter-ref` must
+# name the same tag so the verifier is the same version as the workflow.
+name: promotion-guardrails
+
+on:
+  workflow_call:
+    inputs:
+      promoter-ref:
+        description: platform-promoter ref to build the verifier from (keep equal to the pinned tag)
+        type: string
+        default: v0.1.0
+      fleet:
+        description: raw URL of platform-fleet (tiers.yaml/apps.yaml); default <owner>/platform-fleet@main
+        type: string
+        default: ""
+
+env:
+  GITLEAKS_VERSION: 8.30.1
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      deployments: read
+      pull-requests: read
+    outputs:
+      is_promotion: ${{ steps.verify.outputs.is_promotion }}
+      target: ${{ steps.verify.outputs.target }}
+      requires_approval: ${{ steps.verify.outputs.requires_approval }}
+    steps:
+      - name: Check out the PR head (with main)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: app
+          persist-credentials: false
+
+      - name: Check out the verifier
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/platform-promoter
+          ref: ${{ inputs.promoter-ref }}
+          path: .promoter
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .promoter/go.mod
+          cache-dependency-path: .promoter/go.sum
+
+      - name: Build verifier
+        working-directory: .promoter
+        run: go build -o "$RUNNER_TEMP/promoter" ./cmd/promoter
+
+      - name: Verify promotion rules
+        id: verify
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # read Deployments in this repo
+          FLEET: ${{ inputs.fleet || format('https://raw.githubusercontent.com/{0}/platform-fleet/main', github.repository_owner) }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          "$RUNNER_TEMP/promoter" verify-pr --fleet "$FLEET" --dir app --main-ref origin/main --labels "$LABELS"
+
+      - name: Secret scan (commits in this PR)
+        if: always()
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          f="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -fsSLO "$base/$f"
+          curl -fsSL "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt" | grep " $f\$" | sha256sum -c -
+          tar xzf "$f" gitleaks
+          cd "$GITHUB_WORKSPACE/app"
+          "$RUNNER_TEMP/gitleaks" git --redact --no-banner --log-opts "origin/main..HEAD" .
+
+  approval:
+    needs: guardrails
+    if: needs.guardrails.result == 'success' && needs.guardrails.outputs.is_promotion == 'true'
+    runs-on: ubuntu-24.04
+    permissions: {}
+    # Required reviewers on this environment (tiers with requiresApproval) pause the job here.
+    environment: ${{ needs.guardrails.outputs.target }}
+    steps:
+      - run: echo "Promotion into ${{ needs.guardrails.outputs.target }} allowed (approval required=${{ needs.guardrails.outputs.requires_approval }})."
+
+  promotion-gate:
+    needs: [guardrails, approval]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Decide
+        env:
+          GUARDRAILS: ${{ needs.guardrails.result }}
+          APPROVAL: ${{ needs.approval.result }}
+          IS_PROMOTION: ${{ needs.guardrails.outputs.is_promotion }}
+        run: |
+          echo "guardrails=$GUARDRAILS approval=$APPROVAL is_promotion=$IS_PROMOTION"
+          [ "$GUARDRAILS" = success ] || { echo "::error::guardrails did not pass"; exit 1; }
+          if [ "$IS_PROMOTION" = true ]; then
+            [ "$APPROVAL" = success ] || { echo "::error::target environment did not approve ($APPROVAL)"; exit 1; }
+          fi
+          echo "promotion-gate passed"
