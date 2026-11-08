@@ -9,7 +9,7 @@
 #                   job counts as passing for branch protection, so this job, not
 #                   `needs`, decides.
 #
-# Callers pin this file by tag (…/guardrails.yaml@v0.1.5); `promoter-ref` must
+# Callers pin this file by tag (…/guardrails.yaml@v0.1.6); `promoter-ref` must
 # name the same tag so the verifier is the same version as the workflow.
 name: promotion-guardrails
 
@@ -19,7 +19,7 @@ on:
       promoter-ref:
         description: platform-promoter ref to build the verifier from (keep equal to the pinned tag)
         type: string
-        default: v0.1.5
+        default: v0.1.6
       fleet:
         description: raw URL of platform-fleet (tiers.yaml/apps.yaml); default <owner>/platform-fleet@main
         type: string

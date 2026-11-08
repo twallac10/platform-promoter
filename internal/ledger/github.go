@@ -21,7 +21,7 @@ type GitHub struct {
 }
 
 func NewGitHub(owner, token string) *GitHub {
-	c := github.NewClient(nil)
+	c := github.NewClient(newHTTPClient())
 	if token != "" {
 		c = c.WithAuthToken(token)
 	}
