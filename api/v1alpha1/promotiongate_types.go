@@ -35,9 +35,12 @@ type CheckResult struct {
 
 // GateRun is the latest evidence gate run in this cluster.
 type GateRun struct {
-	Digest         string       `json:"digest"`
-	Version        string       `json:"version,omitempty"`
-	StartTime      metav1.Time  `json:"startTime"`
+	Digest  string `json:"digest"`
+	Version string `json:"version,omitempty"`
+	// StartTime is unset when the run was only mirrored from GitHub (recorded
+	// by another process, e.g. before the cluster was recreated).
+	// +optional
+	StartTime      *metav1.Time `json:"startTime,omitempty"`
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 	Passed         bool         `json:"passed"`
 	Summary        string       `json:"summary,omitempty"`

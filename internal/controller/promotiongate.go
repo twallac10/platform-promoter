@@ -138,7 +138,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Run the gate. Show Checking first so `kubectl get pg` reflects it.
 	log.Info("gate", "app", pg.Spec.App, "why", d.why)
 	start := metav1.NewTime(r.now())
-	pg.Status.LastGate = &v1.GateRun{Digest: d.rel.Digest, Version: d.rel.Version, StartTime: start, ObservedRevision: d.fingerprint}
+	pg.Status.LastGate = &v1.GateRun{Digest: d.rel.Digest, Version: d.rel.Version, StartTime: &start, ObservedRevision: d.fingerprint}
 	setPhase(&pg, v1.PhaseChecking, d.why)
 	if err := r.patchStatus(ctx, orig, &pg); err != nil {
 		return ctrl.Result{}, err
@@ -239,11 +239,12 @@ func (r *Reconciler) decide(ctx context.Context, pg *v1.PromotionGate) (*decisio
 
 	since := time.Duration(1<<62 - 1)
 	if lg := pg.Status.LastGate; lg != nil {
-		t := lg.StartTime.Time
-		if lg.CompletionTime != nil {
-			t = lg.CompletionTime.Time
+		switch {
+		case lg.CompletionTime != nil:
+			since = r.now().Sub(lg.CompletionTime.Time)
+		case lg.StartTime != nil:
+			since = r.now().Sub(lg.StartTime.Time)
 		}
-		since = r.now().Sub(t)
 	}
 	changed := pg.Status.LastGate == nil || pg.Status.LastGate.ObservedRevision != d.fingerprint
 

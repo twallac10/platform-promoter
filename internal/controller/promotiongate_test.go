@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/yaml"
 
 	v1 "github.com/twallac10/platform-promoter/api/v1alpha1"
 	"github.com/twallac10/platform-promoter/internal/config"
@@ -279,7 +282,8 @@ func TestInterruptedGateRerunsAfterRestart(t *testing.T) {
 	var pg v1.PromotionGate
 	s.c.Get(context.Background(), types.NamespacedName{Namespace: "promoter", Name: "kyverno"}, &pg)
 	pg.Status.Phase = v1.PhaseChecking
-	pg.Status.LastGate = &v1.GateRun{Digest: dB, StartTime: metav1.NewTime(now.Add(-time.Minute))}
+	st := metav1.NewTime(now.Add(-time.Minute))
+	pg.Status.LastGate = &v1.GateRun{Digest: dB, StartTime: &st}
 	s.c.Status().Update(context.Background(), &pg)
 	s.reconcile(t)
 	if s.g.promotes != 1 {
@@ -299,6 +303,48 @@ func TestMapFlux(t *testing.T) {
 	} {
 		if got := s.r.mapFlux(context.Background(), tc.obj); len(got) != tc.want {
 			t.Errorf("%s/%s: %v", tc.obj.GetKind(), tc.obj.GetNamespace(), got)
+		}
+	}
+}
+
+// The API server validates status against the CRD: a required field the code
+// can leave empty makes every status patch fail (status stays blank). Mirrored
+// runs (from GitHub) only know digest, version, passed and summary.
+func TestCRDRequiredFieldsAreAlwaysSet(t *testing.T) {
+	raw, err := os.ReadFile("../../config/crd/platform.twallac10.io_promotiongates.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var crd struct {
+		Spec struct {
+			Versions []struct {
+				Schema struct {
+					OpenAPIV3Schema struct {
+						Properties struct {
+							Status struct {
+								Properties struct {
+									LastGate struct {
+										Required []string `json:"required"`
+									} `json:"lastGate"`
+								} `json:"properties"`
+							} `json:"status"`
+						} `json:"properties"`
+					} `json:"openAPIV3Schema"`
+				} `json:"schema"`
+			} `json:"versions"`
+		} `json:"spec"`
+	}
+	if err := yaml.Unmarshal(raw, &crd); err != nil {
+		t.Fatal(err)
+	}
+	pg := &v1.PromotionGate{}
+	mirrorLedger(pg, &ledger.Deployment{State: "success", Payload: ledger.Payload{Digest: dB, Version: "1"}})
+	b, _ := json.Marshal(pg.Status.LastGate)
+	var got map[string]any
+	json.Unmarshal(b, &got)
+	for _, f := range crd.Spec.Versions[0].Schema.OpenAPIV3Schema.Properties.Status.Properties.LastGate.Required {
+		if v, ok := got[f]; !ok || v == nil {
+			t.Errorf("lastGate.%s is required by the CRD but a mirrored run leaves it unset: %s", f, b)
 		}
 	}
 }

@@ -184,6 +184,9 @@ spec:
                       type: object
                     type: array
                   startTime:
+                    description: |-
+                      StartTime is unset when the run was only mirrored from GitHub (recorded
+                      by another process, e.g. before the cluster was recreated).
                     format: date-time
                     type: string
                   summary:
@@ -193,7 +196,6 @@ spec:
                 required:
                 - digest
                 - passed
-                - startTime
                 type: object
               message:
                 description: Message explains the phase in one line.
