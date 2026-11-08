@@ -21,21 +21,18 @@ jobs:
           go-version-file: go.mod
       - name: Vet and test
         run: go vet ./... && go test ./...
-      - name: Build
+      - name: Build and push (linux/amd64 + linux/arm64)
         run: |
           TAG="${GITHUB_REF_NAME}"
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then TAG="$(cat VERSION)"; fi
-          echo "TAG=${TAG}" >> "$GITHUB_ENV"
-          docker build -t "${IMAGE}:${TAG}" .
-      - name: Push
-        run: |
           docker login ghcr.io -u ${{ github.actor }} --password-stdin <<< "${{ secrets.GITHUB_TOKEN }}"
-          docker push "${IMAGE}:${TAG}"
-          DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:${TAG}")"
+          # The default docker driver can't build multi-platform images.
+          docker buildx create --name multi --driver docker-container --use
+          docker buildx build --platform linux/amd64,linux/arm64 -t "${IMAGE}:${TAG}" --push .
           {
             echo "### Pushed image"
             echo
             echo '```'
-            echo "${DIGEST}"
+            docker buildx imagetools inspect "${IMAGE}:${TAG}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
