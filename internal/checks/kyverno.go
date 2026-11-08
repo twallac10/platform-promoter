@@ -35,6 +35,9 @@ var (
 	kyvernoMWCGVR      = schema.GroupVersionResource{Group: "admissionregistration.k8s.io", Version: "v1", Resource: "mutatingwebhookconfigurations"}
 	kyvernoPodGVR      = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 	kyvernoCanaryNS    = "canary"
+	// Dry-run pods go to the promoter's own namespace: it exists wherever a
+	// gate runs, unlike the canary, which is installed after every app.
+	kyvernoDryRunNS = "promoter"
 	kyvernoPrivPolicy  = "disallow-privileged-containers"
 	kyvernoBaselineKey = "kyverno.canary_policy_failures"
 )
@@ -296,7 +299,7 @@ type KyvernoDryRun struct{}
 func (KyvernoDryRun) Name() string { return "kyverno admission dry-run" }
 
 func (KyvernoDryRun) Run(ctx context.Context, env *gate.Env) gate.Result {
-	q := fmt.Sprintf("kubectl -n %s apply --dry-run=server -f <privileged pod>; kubectl get validatingpolicy %s -o jsonpath='{.spec.validationActions}'", kyvernoCanaryNS, kyvernoPrivPolicy)
+	q := fmt.Sprintf("kubectl -n %s apply --dry-run=server -f <privileged pod>; kubectl get validatingpolicy %s -o jsonpath='{.spec.validationActions}'", kyvernoDryRunNS, kyvernoPrivPolicy)
 	p, err := env.Cluster.Dynamic.Resource(kyvernoVPolGVR).Get(ctx, kyvernoPrivPolicy, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -312,7 +315,7 @@ func (KyvernoDryRun) Run(ctx context.Context, env *gate.Env) gate.Result {
 	if deny {
 		mode = "Deny"
 	}
-	return kyvernoDryRunPods(ctx, env, kyvernoCanaryNS, deny, []string{kyvernoPrivPolicy}, mode, q)
+	return kyvernoDryRunPods(ctx, env, kyvernoDryRunNS, deny, []string{kyvernoPrivPolicy}, mode, q)
 }
 
 // ---- 4. canary policy report failures ----
@@ -325,6 +328,11 @@ func (KyvernoCanaryReports) Name() string { return "no new canary policy failure
 
 func (KyvernoCanaryReports) Run(ctx context.Context, env *gate.Env) gate.Result {
 	q := fmt.Sprintf("kubectl -n %s get policyreports.wgpolicyk8s.io -o jsonpath='{.items[*].summary.fail}'", kyvernoCanaryNS)
+	if _, err := env.Cluster.Kube.CoreV1().Namespaces().Get(ctx, kyvernoCanaryNS, metav1.GetOptions{}); err != nil {
+		// Only during bootstrap: the canary is installed after every platform
+		// app. Once it exists, the operator re-gates (it watches the canary).
+		return skip("canary not deployed yet")
+	}
 	list, err := env.Cluster.Dynamic.Resource(kyvernoReportGVR).Namespace(kyvernoCanaryNS).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return pending("list policyreports: "+err.Error(), q)

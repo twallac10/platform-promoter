@@ -46,6 +46,9 @@ var (
 	StuckAfter          = 10 * time.Minute // Flux not Ready this long: gate anyway, to record the failure
 )
 
+// CanaryKustomization is the fleet's Kustomization for the canary tenant.
+const CanaryKustomization = "canary"
+
 var (
 	kustomizationGVK = schema.GroupVersionKind{Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Kind: "Kustomization"}
 	helmReleaseGVK   = schema.GroupVersionKind{Group: "helm.toolkit.fluxcd.io", Version: "v2", Kind: "HelmRelease"}
@@ -258,9 +261,9 @@ func (r *Reconciler) decide(ctx context.Context, pg *v1.PromotionGate) (*decisio
 		d.run, d.why = since > limit, "retry after "+dep.State
 		d.phase, d.after = v1.PhaseFailed, limit-since
 		if !d.run {
-			d.why = pg.Status.Message
-			if d.why == "" {
-				d.why = "gate failed"
+			d.why = "gate failed"
+			if lg := pg.Status.LastGate; lg != nil && lg.Summary != "" {
+				d.why = lg.Summary
 			}
 		}
 	}
@@ -294,10 +297,19 @@ func (r *Reconciler) fluxState(ctx context.Context, app config.App) (fluxState, 
 		return st, err
 	}
 	st.fingerprint = fingerprint(ks, hr)
+	// The canary exercises every app, so its state is part of what a gate
+	// observed: when it changes (e.g. it finally comes up during bootstrap), a
+	// failed gate is retried soon instead of after RetryFailedIdle.
+	canary := &unstructured.Unstructured{}
+	canary.SetGroupVersionKind(kustomizationGVK)
+	if err := r.Get(ctx, types.NamespacedName{Namespace: "flux-system", Name: CanaryKustomization}, canary); err == nil {
+		st.fingerprint += " canary=" + fingerprintOne(canary)
+	}
 	cond := readyCondition(ks)
 	st.ready = cond.status == "True"
 	st.message = cond.reason + ": " + cond.message
-	if !st.ready && !cond.since.IsZero() {
+	// Waiting on a dependency is not this release being stuck.
+	if !st.ready && !cond.since.IsZero() && cond.reason != "DependencyNotReady" {
 		st.notReadyFor = r.now().Sub(cond.since)
 	}
 	return st, nil
@@ -423,6 +435,14 @@ func (r *Reconciler) mapFlux(ctx context.Context, o client.Object) []reconcile.R
 	fleet, err := r.Fleet(ctx)
 	if err != nil {
 		return nil
+	}
+	if o.GetNamespace() == "flux-system" && o.GetName() == CanaryKustomization &&
+		strings.HasPrefix(o.GetObjectKind().GroupVersionKind().Group, "kustomize.") {
+		var reqs []reconcile.Request
+		for _, a := range fleet.Apps {
+			reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: r.Namespace, Name: a.Name}})
+		}
+		return reqs
 	}
 	for _, a := range fleet.Apps {
 		isKS := o.GetNamespace() == "flux-system" && o.GetName() == a.Name && strings.HasPrefix(o.GetObjectKind().GroupVersionKind().Group, "kustomize.")

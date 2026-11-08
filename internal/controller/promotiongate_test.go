@@ -247,6 +247,30 @@ func TestSuspend(t *testing.T) {
 	}
 }
 
+func TestDependencyWaitIsNotStuck(t *testing.T) {
+	s := newSetup(t, "dev", "False", now.Add(-time.Hour))
+	var ks unstructured.Unstructured
+	ks.SetGroupVersionKind(kustomizationGVK)
+	s.c.Get(context.Background(), types.NamespacedName{Namespace: "flux-system", Name: "kyverno"}, &ks)
+	conds, _, _ := unstructured.NestedSlice(ks.Object, "status", "conditions")
+	conds[0].(map[string]any)["reason"] = "DependencyNotReady"
+	unstructured.SetNestedSlice(ks.Object, conds, "status", "conditions")
+	s.c.Update(context.Background(), &ks)
+	pg, _ := s.reconcile(t)
+	if s.g.promotes != 0 || pg.Status.Phase != v1.PhaseWaiting {
+		t.Fatalf("an app waiting on a dependency for an hour must not be gated: %+v", pg.Status)
+	}
+}
+
+func TestCanaryChangeEnqueuesEveryGate(t *testing.T) {
+	s := newSetup(t, "dev", "True", now)
+	c := flux("Kustomization", "flux-system", "True", now, "")
+	c.SetName("canary")
+	if got := s.r.mapFlux(context.Background(), c); len(got) != 1 || got[0].Name != "kyverno" {
+		t.Fatalf("canary change should enqueue every gate: %v", got)
+	}
+}
+
 func TestMapFlux(t *testing.T) {
 	s := newSetup(t, "dev", "True", now)
 	for _, tc := range []struct {

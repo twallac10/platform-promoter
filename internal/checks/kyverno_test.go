@@ -194,7 +194,8 @@ func TestKyvernoCanaryReports(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			env := newEnv(t, kapp, tc.objs, nil, func(e *gate.Env) { e.Baseline = tc.baseline })
+			objs := append([]runtime.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: kyvernoCanaryNS}}}, tc.objs...)
+			env := newEnv(t, kapp, objs, nil, func(e *gate.Env) { e.Baseline = tc.baseline })
 			r := KyvernoCanaryReports{}.Run(ctx, env)
 			expect(t, r, tc.want)
 			got, ok := env.Metrics()[kyvernoBaselineKey]
@@ -217,4 +218,9 @@ func TestKyvernoRegistered(t *testing.T) {
 			t.Errorf("check set %q not registered", n)
 		}
 	}
+}
+
+func TestKyvernoCanaryReportsSkipsBeforeCanaryExists(t *testing.T) {
+	env := newEnv(t, kapp, nil, nil)
+	expect(t, KyvernoCanaryReports{}.Run(context.Background(), env), gate.Skip)
 }

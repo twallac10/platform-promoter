@@ -143,10 +143,10 @@ type KyvernoPolicyDryRun struct{}
 func (KyvernoPolicyDryRun) Name() string { return "kyverno-policies admission dry-run" }
 
 func (KyvernoPolicyDryRun) Run(ctx context.Context, env *gate.Env) gate.Result {
-	q := fmt.Sprintf("kubectl -n %s apply --dry-run=server -f <privileged pod>", kyvernoCanaryNS)
+	q := fmt.Sprintf("kubectl -n %s apply --dry-run=server -f <privileged pod>", kyvernoDryRunNS)
 	enforce, _, err := kyvernoPoliciesExpectedMode(ctx, env)
 	if err != nil {
 		return pending("get helmrelease: "+err.Error(), q)
 	}
-	return kyvernoDryRunPods(ctx, env, kyvernoCanaryNS, enforce, []string{kyvernoPrivPolicy}, kyvernoActionName(enforce), q)
+	return kyvernoDryRunPods(ctx, env, kyvernoDryRunNS, enforce, []string{kyvernoPrivPolicy}, kyvernoActionName(enforce), q)
 }
