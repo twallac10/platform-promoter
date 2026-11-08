@@ -271,6 +271,22 @@ func TestCanaryChangeEnqueuesEveryGate(t *testing.T) {
 	}
 }
 
+func TestInterruptedGateRerunsAfterRestart(t *testing.T) {
+	s := newSetup(t, "dev", "True", now.Add(-time.Hour))
+	s.led.dep = &ledger.Deployment{State: "in_progress", Payload: ledger.Payload{Digest: dB, ReleaseCommit: "c0ffee"}}
+	// The status says Checking (written by the previous pod) and this process
+	// isn't running it: re-run right away, not after RetryStale.
+	var pg v1.PromotionGate
+	s.c.Get(context.Background(), types.NamespacedName{Namespace: "promoter", Name: "kyverno"}, &pg)
+	pg.Status.Phase = v1.PhaseChecking
+	pg.Status.LastGate = &v1.GateRun{Digest: dB, StartTime: metav1.NewTime(now.Add(-time.Minute))}
+	s.c.Status().Update(context.Background(), &pg)
+	s.reconcile(t)
+	if s.g.promotes != 1 {
+		t.Fatal("interrupted gate was not re-run")
+	}
+}
+
 func TestMapFlux(t *testing.T) {
 	s := newSetup(t, "dev", "True", now)
 	for _, tc := range []struct {

@@ -71,6 +71,31 @@ type Reconciler struct {
 	Namespace string
 	Resync    time.Duration
 	Now       func() time.Time
+
+	// running holds the apps whose gate this process is running right now.
+	// An in_progress Deployment for any other app was left by a previous
+	// operator process (one active leader per cluster), so it is stale.
+	mu      sync.Mutex
+	running map[string]bool
+}
+
+func (r *Reconciler) setRunning(app string, on bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.running == nil {
+		r.running = map[string]bool{}
+	}
+	if on {
+		r.running[app] = true
+	} else {
+		delete(r.running, app)
+	}
+}
+
+func (r *Reconciler) isRunning(app string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.running[app]
 }
 
 // +kubebuilder:rbac:groups=platform.twallac10.io,resources=promotiongates,verbs=get;list;watch
@@ -120,6 +145,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	orig = pg.DeepCopy()
 
+	r.setRunning(pg.Spec.App, true)
+	defer r.setRunning(pg.Spec.App, false)
 	var res *promote.Result
 	var url string
 	if d.last {
@@ -234,7 +261,14 @@ func (r *Reconciler) decide(ctx context.Context, pg *v1.PromotionGate) (*decisio
 		// values-only change (same digest, new commit) is gated too.
 		d.run, d.why = true, "new release "+d.rel.Version+" ("+short+" @ "+shortSHA(commit)+")"
 	case dep.State == "in_progress" || dep.State == "queued" || dep.State == "pending":
-		d.run, d.why = since > RetryStale, "stale "+dep.State+" gate"
+		if r.isRunning(app.Name) {
+			d.phase, d.why = v1.PhaseChecking, "gate running"
+			break
+		}
+		// Not ours: left behind by a previous operator process (restart or
+		// upgrade). Re-run now. RetryStale only guards against a gate started
+		// by the CLI moments ago.
+		d.run, d.why = since > RetryStale || pg.Status.Phase == v1.PhaseChecking, "previous gate was interrupted"
 		d.phase, d.after = v1.PhaseChecking, RetryStale-since
 	case dep.State == "success":
 		d.phase = v1.PhasePassed
